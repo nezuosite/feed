@@ -113,7 +113,8 @@ button {
   border-radius: 8px;
 }
 
-#loginBtn {
+/* UID表示ボタン */
+#copyBtn {
   position: fixed;
   top: 60px;
   right: 10px;
@@ -131,8 +132,8 @@ button {
 
 <header>NEZUO FEED CMS</header>
 
-<div id="uidBar">未ログイン</div>
-<button id="loginBtn">Googleログイン</button>
+<div id="uidBar">UID: loading...</div>
+<button id="copyBtn" onclick="copyUID()">UIDコピー</button>
 
 <div id="feed"></div>
 
@@ -153,16 +154,7 @@ import {
   update
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
-import {
-  getAuth,
-  signInWithPopup,
-  GoogleAuthProvider,
-  onAuthStateChanged
-} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-
-/* =========================
-   Firebase Config
-========================= */
+/* ================= Firebase ================= */
 const firebaseConfig = {
   apiKey: "AIzaSyDQMt9IbdNAkozbobhnXQ8Xp__C8ApmlM",
   authDomain: "nezuofeed.firebaseapp.com",
@@ -177,41 +169,40 @@ const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 const chatRef = ref(db, "chat/messages");
 
-const auth = getAuth(app);
-const provider = new GoogleAuthProvider();
+/* ================= UID（固定端末ID） ================= */
+function getUID() {
+  let uid = localStorage.getItem("uid");
 
-/* =========================
-   ADMIN UID ONLY
-========================= */
-const ADMIN_UID = "PUT_ADMIN_UID_HERE";
+  if (!uid) {
+    uid = crypto.randomUUID();
+    localStorage.setItem("uid", uid);
+  }
 
-let isAdmin = false;
+  return uid;
+}
 
-/* LOGIN */
-document.getElementById("loginBtn").onclick = async () => {
-  await signInWithPopup(auth, provider);
+/* ================= ADMIN ================= */
+const ADMIN_UID = "PUT_YOUR_UID_HERE";
+
+function isAdmin() {
+  return getUID() === ADMIN_UID;
+}
+
+/* ================= UID表示 ================= */
+function showUID() {
+  document.getElementById("uidBar").textContent =
+    "UID: " + getUID() + (isAdmin() ? " ｜ ADMIN" : "");
+}
+
+showUID();
+
+/* ================= COPY UID ================= */
+window.copyUID = () => {
+  navigator.clipboard.writeText(getUID());
+  alert("UIDコピーしました");
 };
 
-/* AUTH */
-onAuthStateChanged(auth, (user) => {
-  if (user) {
-
-    isAdmin = (user.uid === ADMIN_UID);
-
-    document.getElementById("uidBar").textContent =
-      "UID: " + user.uid + (isAdmin ? " ｜ ADMIN" : "");
-
-    document.getElementById("inputArea").style.display =
-      isAdmin ? "flex" : "none";
-
-  } else {
-    isAdmin = false;
-    document.getElementById("uidBar").textContent = "未ログイン";
-    document.getElementById("inputArea").style.display = "none";
-  }
-});
-
-/* RENDER */
+/* ================= RENDER ================= */
 const feed = document.getElementById("feed");
 
 function render(data){
@@ -232,7 +223,12 @@ function render(data){
           <div class="meta">${m.uid || "guest"} • ${new Date(m.time).toLocaleString()}</div>
         </div>
 
-        ${isAdmin ? `<button class="delBtn" onclick="event.stopPropagation(); del('${id}')">削除</button>` : ""}
+        ${isAdmin() ? `
+          <button class="delBtn"
+            onclick="event.stopPropagation(); del('${id}')">
+            削除
+          </button>
+        ` : ""}
       </div>
 
       <div class="msg-body">${m.text}</div>
@@ -246,9 +242,12 @@ onValue(chatRef, (snap)=>{
   render(snap.val());
 });
 
-/* SEND */
+/* ================= SEND ================= */
 window.send = () => {
-  if (!isAdmin) return;
+  if (!isAdmin()) {
+    alert("管理者のみ投稿可能");
+    return;
+  }
 
   const title = document.getElementById("title").value;
   const text = document.getElementById("text").value;
@@ -258,7 +257,7 @@ window.send = () => {
   push(chatRef, {
     title: title || "無題",
     text,
-    uid: "ADMIN",
+    uid: getUID(),
     time: Date.now(),
     collapsed: true
   });
@@ -267,16 +266,16 @@ window.send = () => {
   document.getElementById("text").value = "";
 };
 
-/* TOGGLE */
+/* ================= TOGGLE ================= */
 window.toggle = (id,current)=>{
   update(ref(db, `chat/messages/${id}`), {
     collapsed: !current
   });
 };
 
-/* DELETE */
+/* ================= DELETE ================= */
 window.del = (id)=>{
-  if(!isAdmin) return;
+  if(!isAdmin()) return;
   remove(ref(db, `chat/messages/${id}`));
 };
 </script>
