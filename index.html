@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>NEZUO FEED SECURE</title>
+<title>NEZUO FEED MAX</title>
 
 <style>
 body {
@@ -56,11 +56,7 @@ header {
 }
 
 .title { font-weight: bold; }
-
-.meta {
-  font-size: 11px;
-  color: #64748b;
-}
+.meta { font-size: 11px; color: #64748b; }
 
 .msg-body {
   padding: 8px;
@@ -79,6 +75,7 @@ header {
   font-size: 11px;
   padding: 3px 6px;
   border-radius: 4px;
+  cursor: pointer;
 }
 
 #inputArea {
@@ -88,7 +85,7 @@ header {
   right: 0;
   background: #111827;
   padding: 8px;
-  display: none;
+  display: flex;
   flex-direction: column;
   gap: 6px;
   border-top: 1px solid #1f2937;
@@ -117,10 +114,9 @@ button {
 
 <body>
 
-<header>NEZUO FEED SECURE</header>
+<header>NEZUO FEED MAX SYSTEM</header>
 
 <div id="status">認証中...</div>
-
 <div id="feed"></div>
 
 <div id="inputArea">
@@ -136,6 +132,9 @@ import {
   ref,
   push,
   onValue,
+  set,
+  get,
+  child,
   remove,
   update
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
@@ -159,31 +158,48 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
-const chatRef = ref(db, "chat/messages");
-
-/* ================= AUTH（匿名認証） ================= */
 const auth = getAuth(app);
 
+const chatRef = ref(db, "chat/messages");
+const usersRef = ref(db, "users");
+
+/* ================= UID / NEZUO ID ================= */
+let firebaseUID = null;
+let nezuoId = null;
+
+/* ランダムNEZUO ID生成 */
+function generateNezuoId(){
+  const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+  let id = "NEZUO-";
+  for(let i=0;i<6;i++){
+    id += chars[Math.floor(Math.random()*chars.length)];
+  }
+  return id;
+}
+
+/* ================= AUTH ================= */
 signInAnonymously(auth);
 
-/* 管理者UID（Firebaseで取得したものをここに入れる） */
-const ADMIN_UID = "YOUR_ADMIN_UID_HERE";
-
-let myUID = null;
-let isAdmin = false;
-
-/* ================= AUTH監視 ================= */
-onAuthStateChanged(auth, (user) => {
+onAuthStateChanged(auth, async (user) => {
   if (!user) return;
 
-  myUID = user.uid;
-  isAdmin = (myUID === ADMIN_UID);
+  firebaseUID = user.uid;
+
+  const userSnap = await get(child(usersRef, firebaseUID));
+
+  if (userSnap.exists()) {
+    nezuoId = userSnap.val().nezuoId;
+  } else {
+    nezuoId = generateNezuoId();
+    await set(ref(db, `users/${firebaseUID}`), {
+      nezuoId,
+      createdAt: Date.now(),
+      banned: false
+    });
+  }
 
   document.getElementById("status").textContent =
-    "UID: " + myUID + (isAdmin ? " ｜ ADMIN" : " ｜ USER");
-
-  document.getElementById("inputArea").style.display =
-    isAdmin ? "flex" : "none";
+    `NEZUO ID: ${nezuoId} ｜ UID: ${firebaseUID}`;
 });
 
 /* ================= RENDER ================= */
@@ -204,15 +220,13 @@ function render(data){
       <div class="msg-header" onclick="toggle('${id}', ${m.collapsed})">
         <div>
           <div class="title">${m.title || "無題"}</div>
-          <div class="meta">${m.uid || "unknown"} • ${new Date(m.time).toLocaleString()}</div>
+          <div class="meta">${m.nezuoId || "unknown"} • ${new Date(m.time).toLocaleString()}</div>
         </div>
 
-        ${isAdmin ? `
-          <button class="delBtn"
-            onclick="event.stopPropagation(); del('${id}')">
-            削除
-          </button>
-        ` : ""}
+        <button class="delBtn"
+          onclick="event.stopPropagation(); del('${id}')">
+          削除
+        </button>
       </div>
 
       <div class="msg-body">${m.text || ""}</div>
@@ -226,19 +240,18 @@ onValue(chatRef, (snap)=>{
   render(snap.val());
 });
 
-/* ================= SEND（管理者のみ） ================= */
+/* ================= SEND ================= */
 window.send = () => {
-  if (!isAdmin) return;
-
   const title = document.getElementById("title").value;
   const text = document.getElementById("text").value;
 
-  if (!text) return;
+  if (!text || !nezuoId) return;
 
   push(chatRef, {
     title: title || "無題",
     text,
-    uid: "ねづお",
+    uid: firebaseUID,
+    nezuoId,
     time: Date.now(),
     collapsed: true
   });
@@ -249,7 +262,6 @@ window.send = () => {
 
 /* ================= DELETE ================= */
 window.del = (id) => {
-  if (!isAdmin) return;
   remove(ref(db, `chat/messages/${id}`));
 };
 
