@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>NEZUO FEED REALTIME + UID CHECK</title>
+
+<style>
+body {
+  margin: 0;
+  font-family: system-ui;
+  background: #0f172a;
+  color: #e2e8f0;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+header {
+  padding: 10px;
+  background: #111827;
+  text-align: center;
+  font-weight: bold;
+}
+
+#uidBar {
+  padding: 6px 10px;
+  font-size: 12px;
+  background: #0b1220;
+  color: #93c5fd;
+}
+
+#feed {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 200px;
+}
+
+/* CARD */
+.msg {
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.msg-header {
+  padding: 8px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  background: #0f172a;
+}
+
+.title {
+  font-weight: bold;
+}
+
+.meta {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.msg-body {
+  padding: 8px;
+  display: none;
+  white-space: pre-wrap;
+}
+
+.msg.open .msg-body {
+  display: block;
+}
+
+.delBtn {
+  background: #dc2626;
+  border: none;
+  color: white;
+  font-size: 11px;
+  padding: 3px 6px;
+  border-radius: 4px;
+}
+
+/* INPUT */
+#inputArea {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #111827;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid #1f2937;
+}
+
+input, textarea {
+  width: 100%;
+  border: none;
+  border-radius: 8px;
+  padding: 10px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 14px;
+  outline: none;
+}
+
+textarea {
+  min-height: 42px;
+  max-height: 120px;
+  resize: none;
+}
+
+button {
+  padding: 12px;
+  background: #2563eb;
+  border: none;
+  color: white;
+  border-radius: 8px;
+}
+
+/* UID TOOL */
+#uidTool {
+  position: fixed;
+  top: 80px;
+  right: 10px;
+  width: 240px;
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 10px;
+  padding: 8px;
+  font-size: 12px;
+}
+
+#uidTool input {
+  margin-bottom: 6px;
+}
+</style>
+</head>
+
+<body>
+
+<header>NEZUO FEED REALTIME</header>
+
+<div id="uidBar">UID: 読み込み中...</div>
+<div id="feed"></div>
+
+<!-- UID TOOL -->
+<div id="uidTool">
+  <input id="uidCheckInput" placeholder="UIDチェック" />
+  <button onclick="checkUID()">確認</button>
+  <button onclick="loadUIDList()">UID一覧</button>
+  <div id="uidResult" style="margin-top:6px;white-space:pre-wrap;"></div>
+</div>
+
+<div id="inputArea">
+  <input id="title" placeholder="タイトル" />
+  <textarea id="text" placeholder="メッセージ入力"></textarea>
+  <button onclick="send()">送信</button>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import {
+  getDatabase,
+  ref,
+  push,
+  onValue,
+  remove,
+  update,
+  set,
+  get,
+  child
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+/* ===== Firebase ===== */
+const firebaseConfig = {
+  apiKey: "AIzaSyDQMt9IbdNAkozbobhnQXy8Xp__C8ApmlM",
+  authDomain: "nezuofeed.firebaseapp.com",
+  databaseURL: "https://nezuofeed-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "nezuofeed",
+  storageBucket: "nezuofeed.firebasestorage.app",
+  messagingSenderId: "518954118208",
+  appId: "1:518954118208:web:1c560418c274732c4d83a5"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+const chatRef = ref(db, "chat/messages");
+
+/* ===== UID ===== */
+function genUID(){
+  return Math.random().toString(36).slice(2,10).toUpperCase();
+}
+
+let uid = null;
+let uidReady = false;
+
+/* ===== UID INIT（確実版）===== */
+async function initUID(){
+
+  uid = localStorage.getItem("uid");
+
+  if(!uid){
+    uid = genUID();
+
+    await set(ref(db, `users/${uid}`), {
+      name: "ねづお",
+      createdAt: Date.now()
+    });
+
+    localStorage.setItem("uid", uid);
+  } else {
+    const snap = await get(child(ref(db), `users/${uid}`));
+
+    if(!snap.exists()){
+      await set(ref(db, `users/${uid}`), {
+        name: "ねづお",
+        createdAt: Date.now()
+      });
+    }
+  }
+
+  document.getElementById("uidBar").textContent = "UID: " + uid;
+  uidReady = true;
+}
+
+initUID().then(()=>{
+  console.log("UID READY:", uid);
+});
+
+/* ===== RENDER ===== */
+const feed = document.getElementById("feed");
+
+function render(data){
+  feed.innerHTML = "";
+
+  const arr = Object.entries(data || {})
+    .sort((a,b)=>b[1].time - a[1].time);
+
+  arr.forEach(([id,m])=>{
+    const div = document.createElement("div");
+    div.className = "msg";
+    div.classList.toggle("open", !m.collapsed);
+
+    div.innerHTML = `
+      <div class="msg-header" onclick="toggle('${id}', ${m.collapsed})">
+        <div>
+          <div class="title">${m.title || "無題"}</div>
+          <div class="meta">${m.uid} • ${new Date(m.time).toLocaleString()}</div>
+        </div>
+        <button class="delBtn" onclick="event.stopPropagation(); del('${id}')">削除</button>
+      </div>
+
+      <div class="msg-body">
+        ${m.text}
+      </div>
+    `;
+
+    feed.appendChild(div);
+  });
+
+  feed.scrollTop = feed.scrollHeight;
+}
+
+/* ===== REALTIME ===== */
+onValue(chatRef, (snapshot)=>{
+  render(snapshot.val());
+});
+
+/* ===== SEND ===== */
+window.send = ()=>{
+  if(!uidReady || !uid){
+    alert("UID未初期化");
+    return;
+  }
+
+  const title = document.getElementById("title").value;
+  const text = document.getElementById("text").value;
+
+  if(!text) return;
+
+  push(chatRef, {
+    title: title || "無題",
+    text,
+    uid,
+    time: Date.now(),
+    collapsed: true
+  });
+
+  document.getElementById("title").value = "";
+  document.getElementById("text").value = "";
+};
+
+/* ===== TOGGLE ===== */
+window.toggle = (id,current)=>{
+  update(ref(db, `chat/messages/${id}`), {
+    collapsed: !current
+  });
+};
+
+/* ===== DELETE ===== */
+window.del = (id)=>{
+  remove(ref(db, `chat/messages/${id}`));
+};
+
+/* ===== UID CHECK ===== */
+window.checkUID = async () => {
+  const target = document.getElementById("uidCheckInput").value.trim();
+  if(!target) return;
+
+  const snap = await get(child(ref(db), `users/${target}`));
+
+  const result = document.getElementById("uidResult");
+
+  if(snap.exists()){
+    const data = snap.val();
+    result.textContent = `存在: ${target}\n名前: ${data.name}`;
+  } else {
+    result.textContent = `存在しないUID: ${target}`;
+  }
+};
+
+/* ===== UID LIST ===== */
+window.loadUIDList = async () => {
+  const snap = await get(ref(db, "users"));
+  const data = snap.val() || {};
+
+  const list = Object.keys(data);
+
+  document.getElementById("uidResult").textContent =
+    `UID一覧(${list.length})\n\n` + list.join("\n");
+};
+</script>
+
+</body>
+</html>
